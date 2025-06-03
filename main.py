@@ -6,7 +6,6 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, System
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph
-from langgraph.prebuilt import ToolNode
 from duckduckgo_search import DDGS
 from dotenv import load_dotenv
 import base64
@@ -258,9 +257,11 @@ tools = [calculator, duckduckgo_search, fetch_user_from_database,
 def call_model(state: AgentState):
     """Call the model with the current state"""
     messages = state["messages"]
+    tools = [calculator, duckduckgo_search, fetch_user_from_database,
+             analyze_image_url, analyze_local_image, analyze_image_description]
 
-    # add system message if it's the first message
-    if len(messages) == 1 and isinstance(messages[0], HumanMessage):
+    # add system message if not present
+    if not messages or not isinstance(messages[0], SystemMessage):
         system_msg = SystemMessage(content="""You are a helpful AI assistant with access to several tools:
 
 1. Calculator - for mathematical calculations
@@ -320,12 +321,33 @@ Use tools when needed to provide accurate information. Always be helpful and exp
                 content=f"Error analyzing image: {str(e)}")
             return {"messages": messages + [error_response]}
 
-    # otherwise, use normal model with tools
-    model = ChatOpenAI(model="gpt-4o-mini", temperature=0).bind_tools(tools)
-    response = model.invoke(messages)
-
-    # return the updated state
-    return {"messages": messages + [response]}
+    # use normal model with tools
+    try:
+        model = ChatOpenAI(model="gpt-4o-mini",
+                           temperature=0).bind_tools(tools)
+        response = model.invoke(messages)
+        return {"messages": messages + [response]}
+    except Exception as e:
+        # if there's an error with tool messages, try with just the last user message
+        print(f"Tool error: {e}")
+        user_messages = [msg for msg in messages if isinstance(
+            msg, (HumanMessage, SystemMessage))]
+        if user_messages:
+            try:
+                model = ChatOpenAI(model="gpt-4o-mini",
+                                   temperature=0).bind_tools(tools)
+                # system + last user message
+                response = model.invoke(user_messages[-2:])
+                return {"messages": messages + [response]}
+            except Exception as e2:
+                print(f"Fallback error: {e2}")
+                # final fallback - no tools
+                model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+                response = model.invoke([user_messages[-1]])
+                return {"messages": messages + [response]}
+        else:
+            error_response = AIMessage(content=f"Error: {str(e)}")
+            return {"messages": messages + [error_response]}
 
 
 def should_continue(state: AgentState) -> Literal["tools", "__end__"]:
@@ -340,6 +362,56 @@ def should_continue(state: AgentState) -> Literal["tools", "__end__"]:
     return "__end__"
 
 
+def execute_tools(state: AgentState):
+    """Execute tools based on the last message's tool calls"""
+    messages = state["messages"]
+    last_message = messages[-1]
+
+    if not hasattr(last_message, 'tool_calls') or not last_message.tool_calls:
+        return {"messages": messages}
+
+    # create a mapping of tool names to functions
+    tool_map = {
+        "calculator": calculator,
+        "duckduckgo_search": duckduckgo_search,
+        "fetch_user_from_database": fetch_user_from_database,
+        "analyze_image_url": analyze_image_url,
+        "analyze_local_image": analyze_local_image,
+        "analyze_image_description": analyze_image_description,
+    }
+
+    # execute each tool call
+    tool_responses = []
+    for tool_call in last_message.tool_calls:
+        tool_name = tool_call["name"]
+        tool_args = tool_call["args"]
+        tool_id = tool_call["id"]
+
+        if tool_name in tool_map:
+            try:
+                # execute the tool
+                result = tool_map[tool_name].invoke(tool_args)
+
+                # create a tool message with proper structure
+                from langchain_core.messages import ToolMessage
+                tool_message = ToolMessage(
+                    content=str(result),
+                    tool_call_id=tool_id
+                )
+                tool_responses.append(tool_message)
+
+            except Exception as e:
+                # create error tool message
+                from langchain_core.messages import ToolMessage
+                error_message = ToolMessage(
+                    content=f"Error executing {tool_name}: {str(e)}",
+                    tool_call_id=tool_id
+                )
+                tool_responses.append(error_message)
+
+    return {"messages": messages + tool_responses}
+
+
 class LangGraphAgent:
     def __init__(self):
         # create the graph
@@ -347,7 +419,7 @@ class LangGraphAgent:
 
         # add nodes
         workflow.add_node("agent", call_model)
-        workflow.add_node("tools", ToolNode(tools))
+        workflow.add_node("tools", execute_tools)  # Use custom tool execution
 
         # set entry point
         workflow.set_entry_point("agent")
