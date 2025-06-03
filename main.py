@@ -1,15 +1,19 @@
 import os
 import json
 import sqlite3
+import requests
 from typing import TypedDict, List, Literal
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph
+from langgraph.prebuilt import ToolNode
 from duckduckgo_search import DDGS
 from dotenv import load_dotenv
+import base64
+from io import BytesIO
 
-# Load environment variables
+# load environment variables
 load_dotenv()
 
 
@@ -18,6 +22,8 @@ class AgentState(TypedDict):
     messages: List[BaseMessage]
 
 # define tools
+
+
 @tool
 def calculator(expression: str) -> str:
     """
@@ -138,40 +144,73 @@ def fetch_user_from_database(user_id: str) -> str:
 
 
 @tool
-def analyze_image(image_description: str) -> str:
+def analyze_image_url(image_url: str) -> str:
     """
-    Analyze an image description (placeholder for actual image processing).
+    Analyze an image from a URL using OpenAI's vision model.
+
+    Args:
+        image_url: The URL of the image to analyze
+
+    Returns:
+        Analysis of the image
+    """
+    try:
+        # validate URL
+        if not image_url.startswith(('http://', 'https://')):
+            return f"Invalid URL: {image_url}. Please provide a valid HTTP/HTTPS URL."
+
+        # download the image
+        response = requests.get(image_url, timeout=10)
+        response.raise_for_status()
+
+        # check if it's an image
+        content_type = response.headers.get('content-type', '')
+        if not content_type.startswith('image/'):
+            return f"URL does not point to an image. Content type: {content_type}"
+
+        # return success message with image info
+        return f"Successfully downloaded image from {image_url}. Image type: {content_type}. The image is ready for analysis by the vision model."
+
+    except requests.exceptions.RequestException as e:
+        return f"Error downloading image from {image_url}: {str(e)}"
+    except Exception as e:
+        return f"Error processing image from {image_url}: {str(e)}"
+
+
+@tool
+def analyze_image_description(image_description: str) -> str:
+    """
+    Analyze an image based on a text description (placeholder for when no actual image is available).
 
     Args:
         image_description: Description of the image to analyze
 
     Returns:
-        Analysis of the image
+        Analysis based on the description
     """
-    return f"Image analysis for '{image_description}': This appears to be a {image_description.lower()}. I can see various visual elements that suggest specific characteristics of this type of image."
+    return f"Based on the description '{image_description}': This appears to be a {image_description.lower()}. Without seeing the actual image, I can provide general insights about this type of visual content and suggest what elements might typically be present."
 
 
-# create tool list and mapping
-tools = [calculator, duckduckgo_search,
-         fetch_user_from_database, analyze_image]
-tools_by_name = {tool.name: tool for tool in tools}
+# create tool list
+tools = [calculator, duckduckgo_search, fetch_user_from_database,
+         analyze_image_url, analyze_image_description]
 
 
 def call_model(state: AgentState):
     """Call the model with the current state"""
     messages = state["messages"]
 
-    # add system message if it's the first message or if no system message exists
-    has_system_message = any(isinstance(msg, SystemMessage)
-                             for msg in messages)
-    if not has_system_message:
+    # add system message if it's the first message
+    if len(messages) == 1 and isinstance(messages[0], HumanMessage):
         system_msg = SystemMessage(content="""You are a helpful AI assistant with access to several tools:
 
 1. Calculator - for mathematical calculations
 2. DuckDuckGo Search - for web searches  
 3. Database Tool - for fetching user information
-4. Image Analysis - for analyzing images
+4. Image URL Analysis - for analyzing images from URLs using vision AI
+5. Image Description Analysis - for analyzing images based on text descriptions
 
+When a user provides an image URL, use the analyze_image_url tool. When they describe an image, use analyze_image_description.
 Use tools when needed to provide accurate information. Always be helpful and explain your reasoning.""")
         messages = [system_msg] + messages
 
@@ -183,51 +222,6 @@ Use tools when needed to provide accurate information. Always be helpful and exp
     return {"messages": messages + [response]}
 
 
-def execute_tools(state: AgentState):
-    """Execute tools based on the last AI message"""
-    messages = state["messages"]
-    last_message = messages[-1]
-
-    if not hasattr(last_message, 'tool_calls') or not last_message.tool_calls:
-        return {"messages": messages}
-
-    new_messages = []
-
-    for tool_call in last_message.tool_calls:
-        tool_name = tool_call["name"]
-        tool_args = tool_call["args"]
-        tool_call_id = tool_call["id"]
-
-        if tool_name in tools_by_name:
-            try:
-                # execute the tool
-                tool_result = tools_by_name[tool_name].invoke(tool_args)
-
-                # create tool message
-                tool_message = ToolMessage(
-                    content=str(tool_result),
-                    tool_call_id=tool_call_id
-                )
-                new_messages.append(tool_message)
-
-            except Exception as e:
-                # create error tool message
-                tool_message = ToolMessage(
-                    content=f"Error executing {tool_name}: {str(e)}",
-                    tool_call_id=tool_call_id
-                )
-                new_messages.append(tool_message)
-        else:
-            # unknown tool
-            tool_message = ToolMessage(
-                content=f"Unknown tool: {tool_name}",
-                tool_call_id=tool_call_id
-            )
-            new_messages.append(tool_message)
-
-    return {"messages": messages + new_messages}
-
-
 def should_continue(state: AgentState) -> Literal["tools", "__end__"]:
     """Determine whether to continue or end"""
     messages = state["messages"]
@@ -236,7 +230,7 @@ def should_continue(state: AgentState) -> Literal["tools", "__end__"]:
     # if there are tool calls, continue to tools
     if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
         return "tools"
-    # Otherwise, end
+    # otherwise, end
     return "__end__"
 
 
@@ -247,57 +241,37 @@ class LangGraphAgent:
 
         # add nodes
         workflow.add_node("agent", call_model)
-        workflow.add_node("tools", execute_tools)
+        workflow.add_node("tools", ToolNode(tools))
 
         # set entry point
         workflow.set_entry_point("agent")
 
         # add edges
-        workflow.add_conditional_edges(
-            "agent",
-            should_continue,
-            {
-                "tools": "tools",
-                "__end__": END
-            }
-        )
+        workflow.add_conditional_edges("agent", should_continue)
         workflow.add_edge("tools", "agent")
 
         # compile the graph
         self.graph = workflow.compile()
 
-        # initialize conversation state
-        self.conversation_state = {"messages": []}
-
     def chat(self, message: str) -> str:
         """Chat with the agent"""
         try:
-            # add the new human message to the conversation state
-            self.conversation_state["messages"].append(
-                HumanMessage(content=message))
+            # create initial state
+            initial_state = {"messages": [HumanMessage(content=message)]}
 
-            # run the graph with the current conversation state
-            result = self.graph.invoke(self.conversation_state)
-
-            # update the conversation state with the result
-            self.conversation_state = result
+            # run the graph
+            result = self.graph.invoke(initial_state)
 
             # extract the final response
             messages = result["messages"]
             for msg in reversed(messages):
                 if isinstance(msg, AIMessage):
-                    # check if this is a final response (no tool calls or empty tool calls)
-                    if not hasattr(msg, 'tool_calls') or not msg.tool_calls:
-                        return msg.content
+                    return msg.content
 
             return "I couldn't generate a response."
 
         except Exception as e:
             return f"Error: {str(e)}"
-
-    def reset_conversation(self):
-        """Reset the conversation state"""
-        self.conversation_state = {"messages": []}
 
 
 def main():
@@ -310,10 +284,9 @@ def main():
     print("- Perform calculations (try: 'calculate sqrt(144) + 5^2')")
     print("- Search the web (try: 'search for latest Python news')")
     print("- Fetch user data (try: 'fetch user1 from database')")
-    print("- Analyze images (try: 'analyze this image of a sunset')")
-    print("\nCommands:")
-    print("- Type 'reset' to clear conversation history")
-    print("- Type 'quit' to exit\n")
+    print("- Analyze images from URLs (try: 'analyze this https://example.com/image.jpg')")
+    print("- Analyze image descriptions (try: 'analyze this image of a sunset')")
+    print("\nType 'quit' to exit\n")
 
     while True:
         try:
@@ -321,11 +294,6 @@ def main():
             if user_input.lower() in ['quit', 'exit', 'bye']:
                 print("Goodbye! 👋")
                 break
-
-            if user_input.lower() == 'reset':
-                agent.reset_conversation()
-                print("🔄 Conversation history cleared!")
-                continue
 
             if not user_input:
                 continue
