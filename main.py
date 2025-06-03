@@ -1,7 +1,6 @@
 import os
 import json
 import sqlite3
-import requests
 from typing import TypedDict, List, Literal
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from langchain_core.tools import tool
@@ -12,6 +11,8 @@ from duckduckgo_search import DDGS
 from dotenv import load_dotenv
 import base64
 from io import BytesIO
+from PIL import Image
+from pathlib import Path
 
 # load environment variables
 load_dotenv()
@@ -146,35 +147,93 @@ def fetch_user_from_database(user_id: str) -> str:
 @tool
 def analyze_image_url(image_url: str) -> str:
     """
-    Analyze an image from a URL using OpenAI's vision model.
+    Prepare an image from a URL for analysis.
 
     Args:
         image_url: The URL of the image to analyze
 
     Returns:
-        Analysis of the image
+        Confirmation that the image URL is ready for analysis
     """
     try:
         # validate URL
         if not image_url.startswith(('http://', 'https://')):
             return f"Invalid URL: {image_url}. Please provide a valid HTTP/HTTPS URL."
 
-        # download the image
-        response = requests.get(image_url, timeout=10)
-        response.raise_for_status()
+        return f"IMAGE_URL_READY:{image_url}"
 
-        # check if it's an image
-        content_type = response.headers.get('content-type', '')
-        if not content_type.startswith('image/'):
-            return f"URL does not point to an image. Content type: {content_type}"
-
-        # return success message with image info
-        return f"Successfully downloaded image from {image_url}. Image type: {content_type}. The image is ready for analysis by the vision model."
-
-    except requests.exceptions.RequestException as e:
-        return f"Error downloading image from {image_url}: {str(e)}"
     except Exception as e:
-        return f"Error processing image from {image_url}: {str(e)}"
+        return f"Error preparing image from {image_url}: {str(e)}"
+
+
+@tool
+def analyze_local_image(file_path: str) -> str:
+    """
+    Prepare a local image file for analysis by converting it to base64.
+
+    Args:
+        file_path: Path to the local image file (relative to current directory or absolute)
+
+    Returns:
+        Confirmation that the local image is ready for analysis
+    """
+    try:
+        # convert to Path object for easier handling
+        path = Path(file_path)
+
+        # check if file exists
+        if not path.exists():
+            # try relative to current working directory
+            path = Path.cwd() / file_path
+            if not path.exists():
+                return f"Image file not found: {file_path}. Please check the path."
+
+        # check if it's a file
+        if not path.is_file():
+            return f"Path is not a file: {file_path}"
+
+        # validate image extension
+        valid_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
+        if path.suffix.lower() not in valid_extensions:
+            return f"Unsupported image format: {path.suffix}. Supported formats: {', '.join(valid_extensions)}"
+
+        # open and potentially resize the image
+        with Image.open(path) as img:
+            # convert to RGB if necessary (for JPEG compatibility)
+            if img.mode in ('RGBA', 'P'):
+                img = img.convert('RGB')
+
+            # resize if image is too large (to keep base64 size manageable)
+            max_size = (1024, 1024)  # max 1024x1024 pixels
+            if img.size[0] > max_size[0] or img.size[1] > max_size[1]:
+                img.thumbnail(max_size, Image.Resampling.LANCZOS)
+
+            # save to bytes
+            img_bytes = BytesIO()
+
+            # determine format for saving
+            save_format = 'JPEG'
+            if path.suffix.lower() in ['.png', '.gif', '.webp']:
+                save_format = 'PNG'
+
+            img.save(img_bytes, format=save_format, quality=85, optimize=True)
+            img_bytes.seek(0)
+
+            # encode to base64
+            base64_string = base64.b64encode(
+                img_bytes.getvalue()).decode('utf-8')
+
+        # detect image format
+        image_format = save_format.lower()
+
+        # create data URL
+        mime_type = f"image/{image_format}"
+        data_url = f"data:{mime_type};base64,{base64_string}"
+
+        return f"LOCAL_IMAGE_READY:{data_url}|{path.name}"
+
+    except Exception as e:
+        return f"Error preparing local image '{file_path}': {str(e)}"
 
 
 @tool
@@ -193,7 +252,7 @@ def analyze_image_description(image_description: str) -> str:
 
 # create tool list
 tools = [calculator, duckduckgo_search, fetch_user_from_database,
-         analyze_image_url, analyze_image_description]
+         analyze_image_url, analyze_local_image, analyze_image_description]
 
 
 def call_model(state: AgentState):
@@ -208,13 +267,60 @@ def call_model(state: AgentState):
 2. DuckDuckGo Search - for web searches  
 3. Database Tool - for fetching user information
 4. Image URL Analysis - for analyzing images from URLs using vision AI
-5. Image Description Analysis - for analyzing images based on text descriptions
+5. Local Image Analysis - for analyzing local image files by path
+6. Image Description Analysis - for analyzing images based on text descriptions
 
-When a user provides an image URL, use the analyze_image_url tool. When they describe an image, use analyze_image_description.
+When a user provides an image URL, use the analyze_image_url tool. 
+When they provide a file path to a local image, use analyze_local_image tool.
+When they describe an image, use analyze_image_description.
+
 Use tools when needed to provide accurate information. Always be helpful and explain your reasoning.""")
         messages = [system_msg] + messages
 
-    # initialize model with tools
+    # check if any tool results contain image data that needs vision analysis
+    vision_content = None
+    vision_context = ""
+
+    for i, msg in enumerate(reversed(messages)):
+        if hasattr(msg, 'content') and isinstance(msg.content, str):
+            if msg.content.startswith("IMAGE_URL_READY:"):
+                image_url = msg.content.replace("IMAGE_URL_READY:", "")
+                vision_content = [
+                    {"type": "text", "text": "Please analyze this image and describe what you see in detail."},
+                    {"type": "image_url", "image_url": {"url": image_url}}
+                ]
+                vision_context = f"Image from URL: {image_url}"
+                break
+            elif msg.content.startswith("LOCAL_IMAGE_READY:"):
+                parts = msg.content.replace(
+                    "LOCAL_IMAGE_READY:", "").split("|")
+                data_url = parts[0]
+                filename = parts[1] if len(parts) > 1 else "unknown"
+                vision_content = [
+                    {"type": "text",
+                        "text": f"Please analyze this local image ({filename}) and describe what you see in detail. Include information about objects, people, colors, composition, and any text visible in the image."},
+                    {"type": "image_url", "image_url": {"url": data_url}}
+                ]
+                vision_context = f"Local image: {filename}"
+                break
+
+    # if we have vision content, use vision model
+    if vision_content:
+        try:
+            vision_model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+            vision_message = HumanMessage(content=vision_content)
+            vision_response = vision_model.invoke([vision_message])
+
+            # create a response message with the vision analysis
+            analysis_response = AIMessage(
+                content=f"Image analysis for {vision_context}:\n\n{vision_response.content}")
+            return {"messages": messages + [analysis_response]}
+        except Exception as e:
+            error_response = AIMessage(
+                content=f"Error analyzing image: {str(e)}")
+            return {"messages": messages + [error_response]}
+
+    # otherwise, use normal model with tools
     model = ChatOpenAI(model="gpt-4o-mini", temperature=0).bind_tools(tools)
     response = model.invoke(messages)
 
@@ -274,6 +380,39 @@ class LangGraphAgent:
             return f"Error: {str(e)}"
 
 
+def create_test_images():
+    """Create a test images directory with sample images for testing"""
+    test_dir = Path("test_images")
+    test_dir.mkdir(exist_ok=True)
+
+    # create a simple test image using PIL
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+
+        # create a simple colored rectangle with text
+        img = Image.new('RGB', (400, 300), color='lightblue')
+        draw = ImageDraw.Draw(img)
+
+        # add some shapes and text
+        draw.rectangle([50, 50, 350, 250], outline='darkblue', width=3)
+        draw.ellipse([100, 100, 200, 200], fill='yellow',
+                     outline='orange', width=2)
+        draw.text((120, 120), "TEST", fill='black')
+        draw.text((150, 260), "Sample Image", fill='darkblue')
+
+        # save test image
+        test_image_path = test_dir / "sample_test.png"
+        img.save(test_image_path)
+
+        print(f"✅ Created test image: {test_image_path}")
+        return str(test_image_path)
+
+    except Exception as e:
+        print(f"❌ Could not create test image: {e}")
+        print("💡 You can manually add your own images to the 'test_images' folder")
+        return None
+
+
 def main():
     # create agent
     agent = LangGraphAgent()
@@ -285,7 +424,17 @@ def main():
     print("- Search the web (try: 'search for latest Python news')")
     print("- Fetch user data (try: 'fetch user1 from database')")
     print("- Analyze images from URLs (try: 'analyze this https://example.com/image.jpg')")
+    print("- Analyze local images (try: 'analyze image test_images/sample_test.png')")
     print("- Analyze image descriptions (try: 'analyze this image of a sunset')")
+    print()
+
+    # create test images directory and sample image
+    print("🖼️ Setting up test images...")
+    test_image = create_test_images()
+
+    if test_image:
+        print(f"💡 Try: 'analyze image {test_image}'")
+
     print("\nType 'quit' to exit\n")
 
     while True:
