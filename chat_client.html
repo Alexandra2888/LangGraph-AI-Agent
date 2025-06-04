@@ -147,6 +147,12 @@
             background: white;
             border-top: 1px solid #e9ecef;
             display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .input-row {
+            display: flex;
             gap: 10px;
             align-items: flex-end;
         }
@@ -174,6 +180,83 @@
             border-color: #667eea;
         }
 
+        .image-upload-area {
+            border: 2px dashed #e9ecef;
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            background: #f8f9fa;
+        }
+
+        .image-upload-area:hover {
+            border-color: #667eea;
+            background: #f0f4ff;
+        }
+
+        .image-upload-area.dragover {
+            border-color: #667eea;
+            background: #e3f2fd;
+            transform: scale(1.02);
+        }
+
+        .upload-text {
+            color: #6c757d;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+
+        .upload-button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .image-preview-container {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+
+        .image-preview {
+            position: relative;
+            width: 80px;
+            height: 80px;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 2px solid #e9ecef;
+        }
+
+        .image-preview img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .image-remove {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            font-size: 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
         .send-button {
             padding: 12px 24px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -196,6 +279,26 @@
             opacity: 0.6;
             cursor: not-allowed;
             transform: none;
+        }
+
+        .image-message {
+            background: white;
+            color: #333;
+            border: 1px solid #e9ecef;
+            margin-right: auto;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            max-width: 90%;
+        }
+
+        .image-message img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+
+        .hidden {
+            display: none;
         }
 
         .status-bar {
@@ -271,6 +374,45 @@
                 padding: 0;
             }
         }
+
+        .examples-section {
+            margin-top: 15px;
+            text-align: center;
+        }
+
+        .examples-section h3 {
+            margin-bottom: 10px;
+            color: #6c757d;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .examples-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .example-btn {
+            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+            border: 1px solid #dee2e6;
+            color: #495057;
+            padding: 8px 12px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            transition: all 0.2s;
+            text-align: center;
+        }
+
+        .example-btn:hover {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
     </style>
 </head>
 <body>
@@ -286,11 +428,28 @@
         <div class="chat-messages" id="chatMessages">
             <div class="message system-message">
                 Welcome! I'm your AI assistant with multiple capabilities.
-                <div class="examples">
-                    <div class="example-button" onclick="sendExample('Calculate 15 * 23 + 7')">🧮 Calculate</div>
-                    <div class="example-button" onclick="sendExample('Search for latest AI news')">🔍 Search</div>
-                    <div class="example-button" onclick="sendExample('Fetch user1 from database')">💾 Database</div>
-                    <div class="example-button" onclick="sendExample('What can you do?')">❓ Help</div>
+                <div class="examples-section">
+                    <h3>Try these examples:</h3>
+                    <div class="examples-grid">
+                        <button class="example-btn" onclick="sendExample('Calculate the square root of 144 plus 25')">
+                            🧮 Math: √144 + 25
+                        </button>
+                        <button class="example-btn" onclick="sendExample('Search for the latest news about artificial intelligence')">
+                            🔍 Search: AI News
+                        </button>
+                        <button class="example-btn" onclick="sendExample('Fetch user information for user1 from the database')">
+                            💾 Database: Get User1
+                        </button>
+                        <button class="example-btn" onclick="sendExample('Analyze this image: test_images/dog.jpg')">
+                            🖼️ Local Image: Dog
+                        </button>
+                        <button class="example-btn" onclick="sendExample('Analyze this image: https://picsum.photos/400/300')">
+                            🌐 URL Image: Random
+                        </button>
+                        <button class="example-btn" onclick="sendExample('Upload an image above and ask me to analyze it!')">
+                            📷 Upload & Analyze
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -300,15 +459,23 @@
         </div>
         
         <div class="chat-input-container">
-            <div class="input-wrapper">
-                <textarea 
-                    class="chat-input" 
-                    id="chatInput" 
-                    placeholder="Type your message here... (Press Ctrl+Enter to send)"
-                    rows="1"
-                ></textarea>
+            <div class="input-row">
+                <div class="input-wrapper">
+                    <textarea 
+                        class="chat-input" 
+                        id="chatInput" 
+                        placeholder="Type your message here..."
+                        rows="1"
+                    ></textarea>
+                </div>
+                <button class="send-button" id="sendButton">Send</button>
             </div>
-            <button class="send-button" id="sendButton">Send</button>
+            <div class="image-upload-area" id="imageUploadArea">
+                <div class="upload-text">Drag and drop images here or click to upload</div>
+                <button class="upload-button" type="button">📷 Upload Image</button>
+                <input type="file" id="fileInput" class="hidden" accept="image/*" multiple>
+            </div>
+            <div class="image-preview-container" id="imagePreviewContainer"></div>
         </div>
     </div>
 
@@ -316,55 +483,151 @@
         class ModernChatClient {
             constructor() {
                 this.apiUrl = 'http://localhost:8000';
+                this.sessionId = this.generateSessionId();
+                this.isStreaming = false;
+                this.currentStreamingMessage = null;
+                this.uploadedImages = []; // Store uploaded images
+                
+                this.initializeElements();
+                this.setupEventListeners();
+                this.setupImageUpload();
+                this.setStatus('Ready to chat');
+                
+                this.addMessage("👋 Hello! I'm your AI assistant. I can help with calculations, web searches, database queries, and image analysis. Try uploading an image or asking me anything!", 'system');
+            }
+
+            initializeElements() {
                 this.chatMessages = document.getElementById('chatMessages');
                 this.chatInput = document.getElementById('chatInput');
                 this.sendButton = document.getElementById('sendButton');
                 this.statusBar = document.getElementById('statusBar');
-                this.sessionId = this.generateSessionId();
-                this.isStreaming = false;
-                this.currentStreamingMessage = null;
-                
-                this.initializeEventListeners();
-                this.checkServerHealth();
+                this.imageUploadArea = document.getElementById('imageUploadArea');
+                this.fileInput = document.getElementById('fileInput');
+                this.imagePreviewContainer = document.getElementById('imagePreviewContainer');
             }
 
-            generateSessionId() {
-                return 'session_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
-            }
-
-            initializeEventListeners() {
+            setupEventListeners() {
                 this.sendButton.addEventListener('click', () => this.sendMessage());
                 
                 this.chatInput.addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter') {
-                        if (e.ctrlKey || e.metaKey) {
-                            e.preventDefault();
-                            this.sendMessage();
-                        }
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        this.sendMessage();
                     }
                 });
 
-                // Auto-resize textarea
                 this.chatInput.addEventListener('input', () => {
                     this.chatInput.style.height = 'auto';
                     this.chatInput.style.height = Math.min(this.chatInput.scrollHeight, 120) + 'px';
                 });
             }
 
-            async checkServerHealth() {
-                try {
-                    const response = await fetch(`${this.apiUrl}/health`, { timeout: 5000 });
-                    if (response.ok) {
-                        this.setStatus('Server connected', 'connected');
-                    } else {
-                        this.setStatus('Server error', 'error');
+            setupImageUpload() {
+                // File input change event
+                this.fileInput.addEventListener('change', (e) => {
+                    this.handleFiles(e.target.files);
+                });
+
+                // Upload area click event
+                this.imageUploadArea.addEventListener('click', (e) => {
+                    if (e.target.classList.contains('upload-button') || e.target.closest('.upload-button')) {
+                        this.fileInput.click();
                     }
-                } catch (error) {
-                    this.setStatus('Server offline - Please start the server', 'error');
+                });
+
+                // drag and drop events
+                this.imageUploadArea.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    this.imageUploadArea.classList.add('dragover');
+                });
+
+                this.imageUploadArea.addEventListener('dragleave', (e) => {
+                    e.preventDefault();
+                    this.imageUploadArea.classList.remove('dragover');
+                });
+
+                this.imageUploadArea.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    this.imageUploadArea.classList.remove('dragover');
+                    this.handleFiles(e.dataTransfer.files);
+                });
+            }
+
+            async handleFiles(files) {
+                for (let file of files) {
+                    if (file.type.startsWith('image/')) {
+                        await this.processImage(file);
+                    }
                 }
             }
 
-            setStatus(message, type = 'default') {
+            async processImage(file) {
+                try {
+                    // create preview
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        this.addImagePreview(e.target.result, file.name);
+                    };
+                    reader.readAsDataURL(file);
+
+                    // convert to base64 for API
+                    const base64 = await this.fileToBase64(file);
+                    
+                    // store image data
+                    const imageData = {
+                        data: base64.split(',')[1], 
+                        type: 'base64',
+                        filename: file.name,
+                        mime_type: file.type
+                    };
+                    
+                    this.uploadedImages.push(imageData);
+                    
+                } catch (error) {
+                    console.error('Error processing image:', error);
+                    this.setStatus(`Error processing image: ${error.message}`, 'error');
+                }
+            }
+
+            fileToBase64(file) {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.readAsDataURL(file);
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = error => reject(error);
+                });
+            }
+
+            addImagePreview(src, filename) {
+                const previewDiv = document.createElement('div');
+                previewDiv.className = 'image-preview';
+                
+                const img = document.createElement('img');
+                img.src = src;
+                img.alt = filename;
+                
+                const removeBtn = document.createElement('button');
+                removeBtn.className = 'image-remove';
+                removeBtn.innerHTML = '×';
+                removeBtn.onclick = () => {
+                    // remove from uploaded images array
+                    const index = Array.from(this.imagePreviewContainer.children).indexOf(previewDiv);
+                    if (index > -1) {
+                        this.uploadedImages.splice(index, 1);
+                    }
+                    previewDiv.remove();
+                };
+                
+                previewDiv.appendChild(img);
+                previewDiv.appendChild(removeBtn);
+                this.imagePreviewContainer.appendChild(previewDiv);
+            }
+
+            generateSessionId() {
+                return 'session_' + Math.random().toString(36).substr(2, 9);
+            }
+
+            setStatus(message, type = 'ready') {
                 this.statusBar.textContent = message;
                 this.statusBar.className = `status-bar status-${type}`;
             }
@@ -421,19 +684,25 @@
                 const message = messageText || this.chatInput.value.trim();
                 if (!message || this.isStreaming) return;
 
-                // Add user message
+                // add user message
                 this.addMessage(message, 'user');
+                
+                // if there are images, show them in the chat
+                if (this.uploadedImages.length > 0) {
+                    this.addImagesMessage(this.uploadedImages);
+                }
+                
                 if (!messageText) {
                     this.chatInput.value = '';
                     this.chatInput.style.height = 'auto';
                 }
                 
-                // Disable input while processing
+                // disable input while processing
                 this.isStreaming = true;
                 this.sendButton.disabled = true;
                 this.chatInput.disabled = true;
                 
-                // Add typing indicator
+                // add typing indicator
                 const typingIndicator = this.addTypingIndicator();
                 
                 try {
@@ -442,7 +711,7 @@
                     console.error('Streaming error:', error);
                     this.setStatus(`Error: ${error.message}`, 'error');
                     
-                    // Remove typing indicator and add error message
+                    // remove typing indicator and add error message
                     this.removeTypingIndicator(typingIndicator);
                     this.addMessage(`Error: ${error.message}`, 'agent');
                 } finally {
@@ -453,26 +722,60 @@
                     this.chatInput.focus();
                     this.setStatus('Ready to chat');
                     
-                    // Clean up
+                    // clean up
                     this.removeTypingIndicator(typingIndicator);
                     if (this.currentStreamingMessage) {
                         this.currentStreamingMessage.className = 'message agent-message';
                         this.currentStreamingMessage = null;
                     }
+                    
+                    // clear uploaded images after sending
+                    this.clearImages();
                 }
             }
 
+            addImagesMessage(images) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'message image-message';
+                
+                const text = document.createElement('div');
+                text.textContent = `📷 Uploaded ${images.length} image${images.length > 1 ? 's' : ''} for analysis`;
+                messageDiv.appendChild(text);
+                
+                images.forEach(image => {
+                    const img = document.createElement('img');
+                    img.src = `data:${image.mime_type};base64,${image.data}`;
+                    img.alt = image.filename;
+                    messageDiv.appendChild(img);
+                });
+                
+                this.chatMessages.appendChild(messageDiv);
+                this.scrollToBottom();
+            }
+
+            clearImages() {
+                this.uploadedImages = [];
+                this.imagePreviewContainer.innerHTML = '';
+            }
+
             async streamResponse(message) {
+                const requestBody = {
+                    message: message,
+                    session_id: this.sessionId,
+                    stream: true
+                };
+
+                // Include images if any are uploaded
+                if (this.uploadedImages.length > 0) {
+                    requestBody.images = this.uploadedImages;
+                }
+
                 const response = await fetch(`${this.apiUrl}/chat/stream`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({
-                        message: message,
-                        session_id: this.sessionId,
-                        stream: true
-                    })
+                    body: JSON.stringify(requestBody)
                 });
 
                 if (!response.ok) {

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 import logging
@@ -7,6 +7,7 @@ from typing import Dict, Any, List
 import uuid
 import json
 import asyncio
+import base64
 
 from .models import (
     ChatRequest,
@@ -16,7 +17,8 @@ from .models import (
     ErrorResponse,
     HealthResponse,
     AgentInfoResponse,
-    AgentCapabilities
+    AgentCapabilities,
+    ImageData
 )
 from .agent import LangGraphAgent
 
@@ -158,8 +160,8 @@ async def chat_with_agent(request: ChatRequest):
         logger.info(
             f"Processing chat request - Session: {session_id}, Message: {request.message[:100]}...")
 
-        # get response from agent
-        response = agent_instance.chat(request.message)
+        # get response from agent with images if provided
+        response = agent_instance.chat(request.message, request.images)
 
         logger.info(f"Agent response generated - Session: {session_id}")
 
@@ -211,7 +213,7 @@ async def stream_chat_with_agent(request: StreamingChatRequest):
         """Generate Server-Sent Events stream"""
         try:
             # Stream the agent response (agent will send its own connected event)
-            async for event_data in agent_instance.chat_stream_async(request.message):
+            async for event_data in agent_instance.chat_stream_async(request.message, request.images):
                 # Add session_id to each event
                 event_data['session_id'] = session_id
 
@@ -281,6 +283,52 @@ async def get_agent_status():
         "initialized": agent_instance is not None,
         "status": "ready" if agent_instance is not None else "not_initialized"
     }
+
+
+@app.post("/upload-image", response_model=ImageData)
+async def upload_image(file: UploadFile = File(...)):
+    """Upload an image and return its base64 representation"""
+    global agent_instance
+
+    if agent_instance is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Agent not initialized"
+        )
+
+    try:
+        # Validate file type
+        if not file.content_type or not file.content_type.startswith('image/'):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File must be an image"
+            )
+
+        # Read the uploaded file
+        file_content = await file.read()
+
+        # Convert to base64
+        base64_string = base64.b64encode(file_content).decode('utf-8')
+
+        # Create ImageData object
+        image_data = ImageData(
+            data=base64_string,
+            type="base64",
+            filename=file.filename,
+            mime_type=file.content_type
+        )
+
+        logger.info(f"Image uploaded successfully: {file.filename}")
+        return image_data
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error uploading image: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error processing image: {str(e)}"
+        )
 
 if __name__ == "__main__":
     from granian import Granian
