@@ -1,6 +1,6 @@
 # LangGraph Agent API
 
-A powerful AI agent built with LangGraph and FastAPI that provides calculator, web search, database query, and image analysis capabilities.
+A powerful AI agent built with LangGraph and FastAPI that provides calculator, web search, database query, and image analysis capabilities with **real-time streaming responses**.
 
 ## 🚀 Quick Start
 
@@ -23,27 +23,26 @@ A powerful AI agent built with LangGraph and FastAPI that provides calculator, w
 
 ### Running the Server
 
-**Option 1: Using run_server.py (Recommended)**
+**Recommended:**
 ```bash
 python run_server.py
 ```
 
-**Option 2: Using Granian directly**
+**Alternative methods:**
 ```bash
+# Using Granian directly
 python -m granian --interface asgi app.main:app --host 0.0.0.0 --port 8000 --reload
-```
 
-**Option 3: CLI version**
-```bash
+# CLI version
 python main.py
 ```
 
 ### Testing
 
-**Test the API:**
 ```bash
 python test_server.py    # Test basic endpoints
-python test_tools.py     # Test agent capabilities
+python test_tools.py     # Test agent capabilities  
+python test_streaming.py # Test streaming functionality
 ```
 
 **Interactive API docs:** `http://localhost:8000/docs`
@@ -65,17 +64,63 @@ python test_tools.py     # Test agent capabilities
 | `GET` | `/health` | Health check |
 | `GET` | `/agent/info` | Agent information |
 | `GET` | `/agent/capabilities` | Available tools |
-| `POST` | `/chat` | Chat with agent |
+| `POST` | `/chat` | Chat with agent (regular) |
+| `POST` | `/chat/stream` | **Chat with streaming responses** |
 
-### Example API Usage
-
+### Regular Chat
 ```bash
-# Chat with the agent
 curl -X POST "http://localhost:8000/chat" \
      -H "Content-Type: application/json" \
      -d '{"message": "Calculate 25 * 4 + sqrt(81)"}'
+```
 
-# Response: {"response": "The result is 109.0"}
+### Streaming Chat
+```bash
+curl -X POST "http://localhost:8000/chat/stream" \
+     -H "Content-Type: application/json" \
+     -d '{"message": "Calculate 25 * 4", "stream": true}' \
+     --no-buffer
+```
+
+## 🌊 Streaming Features
+
+### Real-time Token Streaming
+- **Token-by-token responses** as they're generated
+- **Tool execution status** updates in real-time
+- **Better user experience** with immediate feedback
+
+### Streaming Events
+| Event | Description |
+|-------|-------------|
+| `token` | Individual response tokens |
+| `tool_start` | Tool execution beginning |
+| `tool_end` | Tool execution completed |
+| `error` | Error handling |
+| `done` | Response completion |
+
+### Web Client
+Open `streaming_client.html` in your browser for a beautiful real-time chat interface.
+
+### Python Streaming Client
+```python
+import requests
+import json
+
+def stream_chat(message):
+    response = requests.post(
+        'http://localhost:8000/chat/stream',
+        json={"message": message, "stream": True},
+        stream=True
+    )
+    
+    for line in response.iter_lines():
+        if line and line.startswith(b'data: '):
+            event = json.loads(line[6:])
+            if event['event'] == 'token':
+                print(event['data'], end='', flush=True)
+
+# Usage
+stream_chat("What can you do?")
 ```
 
 ## 🏗️ Project Structure
@@ -83,11 +128,13 @@ curl -X POST "http://localhost:8000/chat" \
 ```
 langgraph-agent/
 ├── app/
-│   ├── main.py          # FastAPI application
+│   ├── main.py          # FastAPI application with streaming
 │   ├── agent.py         # LangGraph agent implementation
 │   └── models.py        # Pydantic models
 ├── test_server.py       # API endpoint tests
 ├── test_tools.py        # Agent capability tests
+├── test_streaming.py    # Streaming functionality tests
+├── streaming_client.html # Web client for testing
 ├── run_server.py        # Server runner script
 ├── main.py              # CLI version
 ├── requirements.txt     # Dependencies
@@ -119,11 +166,29 @@ TEMPERATURE=0
 All components working correctly:
 - ✅ Server starts successfully
 - ✅ API endpoints respond
+- ✅ **Streaming responses work**
 - ✅ Calculator tool works
 - ✅ Database tool works  
 - ✅ Search tool works
 - ✅ Image analysis available
 - ✅ Error handling implemented
+
+## 🧪 Testing Streaming
+
+### Interactive Mode
+```bash
+python test_streaming.py
+```
+
+### Batch Testing
+```bash
+python test_streaming.py batch
+```
+
+### Single Message
+```bash
+python test_streaming.py single "Calculate 2+2"
+```
 
 ## 🐛 Troubleshooting
 
@@ -132,10 +197,11 @@ All components working correctly:
 - Verify OpenAI API key is set
 - Install missing dependencies: `pip install -r requirements.txt`
 
+**Streaming not working:**
+- Ensure you're using the `/chat/stream` endpoint
+- Check that `stream: true` is in the request body
+- Verify the client supports Server-Sent Events
+
 **Tools not working:**
 - Ensure OpenAI API key is valid
 - Check internet connection for search tool
-
-**Import errors:**
-- Make sure you're in the project directory
-- Activate virtual environment if using one

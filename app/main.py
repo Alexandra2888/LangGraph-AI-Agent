@@ -1,14 +1,18 @@
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import logging
 from contextlib import asynccontextmanager
 from typing import Dict, Any, List
 import uuid
+import json
+import asyncio
 
 from .models import (
     ChatRequest,
+    StreamingChatRequest,
     ChatResponse,
+    StreamingEvent,
     ErrorResponse,
     HealthResponse,
     AgentInfoResponse,
@@ -93,7 +97,8 @@ async def root():
         "message": "Welcome to LangGraph Agent API",
         "docs": "/docs",
         "health": "/health",
-        "agent_info": "/agent/info"
+        "agent_info": "/agent/info",
+        "streaming_chat": "/chat/stream"
     }
 
 
@@ -169,6 +174,78 @@ async def chat_with_agent(request: ChatRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error processing request: {str(e)}"
         )
+
+
+@app.options("/chat/stream")
+async def stream_chat_options():
+    """Handle CORS preflight requests for streaming endpoint"""
+    return JSONResponse(
+        content={},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "Access-Control-Max-Age": "86400",
+        }
+    )
+
+
+@app.post("/chat/stream")
+async def stream_chat_with_agent(request: StreamingChatRequest):
+    """Stream chat responses from the LangGraph agent using Server-Sent Events"""
+    global agent_instance
+
+    if agent_instance is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Agent not initialized"
+        )
+
+    # Generate session ID if not provided
+    session_id = request.session_id or str(uuid.uuid4())
+
+    logger.info(
+        f"Processing streaming chat request - Session: {session_id}, Message: {request.message[:100]}...")
+
+    async def generate_stream():
+        """Generate Server-Sent Events stream"""
+        try:
+            # Stream the agent response (agent will send its own connected event)
+            async for event_data in agent_instance.chat_stream_async(request.message):
+                # Add session_id to each event
+                event_data['session_id'] = session_id
+
+                # Format as Server-Sent Event
+                yield f"data: {json.dumps(event_data)}\n\n"
+
+                # Add small delay between events for better UX
+                await asyncio.sleep(0.01)
+
+            logger.info(f"Streaming completed - Session: {session_id}")
+
+        except Exception as e:
+            logger.error(f"Error in streaming chat: {e}")
+            error_event = {
+                "event": "error",
+                "data": str(e),
+                "session_id": session_id
+            }
+            yield f"data: {json.dumps(error_event)}\n\n"
+
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Content-Type": "text/event-stream",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        }
+    )
+
 
 # additional utility endpoints
 
