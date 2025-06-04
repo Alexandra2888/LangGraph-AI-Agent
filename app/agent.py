@@ -432,11 +432,27 @@ class LangGraphAgent:
         # compile the graph
         self.graph = workflow.compile()
 
-    def chat(self, message: str) -> str:
+    def chat(self, message: str, images: List = None) -> str:
         """Chat with the agent"""
         try:
-            # Create initial state
-            initial_state = {"messages": [HumanMessage(content=message)]}
+            # Create initial state with message
+            human_message = HumanMessage(content=message)
+
+            # If images are provided, process them first
+            if images:
+                processed_images = self._process_images(images)
+                if processed_images:
+                    # Add image analysis results to the conversation
+                    image_messages = []
+                    for img_result in processed_images:
+                        image_messages.append(HumanMessage(content=img_result))
+
+                    initial_state = {"messages": [
+                        human_message] + image_messages}
+                else:
+                    initial_state = {"messages": [human_message]}
+            else:
+                initial_state = {"messages": [human_message]}
 
             # Run the graph
             result = self.graph.invoke(initial_state)
@@ -452,11 +468,50 @@ class LangGraphAgent:
         except Exception as e:
             return f"Error: {str(e)}"
 
-    def chat_stream(self, message: str) -> Generator[dict, None, None]:
+    def _process_images(self, images: List) -> List[str]:
+        """Process images and return analysis results"""
+        results = []
+
+        for image in images:
+            try:
+                if image.type == "url":
+                    # Process URL image
+                    result = analyze_image_url.invoke(
+                        {"image_url": image.data})
+                    results.append(result)
+                elif image.type == "base64":
+                    # Process base64 image - create a data URL
+                    mime_type = image.mime_type or "image/jpeg"
+                    data_url = f"data:{mime_type};base64,{image.data}"
+                    filename = image.filename or "uploaded_image"
+                    result = f"LOCAL_IMAGE_READY:{data_url}|{filename}"
+                    results.append(result)
+            except Exception as e:
+                results.append(f"Error processing image: {str(e)}")
+
+        return results
+
+    def chat_stream(self, message: str, images: List = None) -> Generator[dict, None, None]:
         """Chat with the agent with streaming support"""
         try:
-            # Create initial state
-            initial_state = {"messages": [HumanMessage(content=message)]}
+            # Create initial state with message
+            human_message = HumanMessage(content=message)
+
+            # If images are provided, process them first
+            if images:
+                processed_images = self._process_images(images)
+                if processed_images:
+                    # Add image analysis results to the conversation
+                    image_messages = []
+                    for img_result in processed_images:
+                        image_messages.append(HumanMessage(content=img_result))
+
+                    initial_state = {"messages": [
+                        human_message] + image_messages}
+                else:
+                    initial_state = {"messages": [human_message]}
+            else:
+                initial_state = {"messages": [human_message]}
 
             # Track tool execution phase and final response
             tool_phase = False
@@ -500,7 +555,7 @@ class LangGraphAgent:
         except Exception as e:
             yield {"event": "error", "data": str(e)}
 
-    async def chat_stream_async(self, message: str) -> AsyncGenerator[dict, None]:
+    async def chat_stream_async(self, message: str, images: List = None) -> AsyncGenerator[dict, None]:
         """Async version of chat_stream with real-time streaming"""
         try:
             # Send connection event
@@ -513,7 +568,7 @@ class LangGraphAgent:
                 """Collect all streaming events"""
                 events = []
                 try:
-                    for event in self.chat_stream(message):
+                    for event in self.chat_stream(message, images):
                         events.append(event)
                 except Exception as e:
                     events.append({"event": "error", "data": str(e)})

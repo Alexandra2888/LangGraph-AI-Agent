@@ -363,3 +363,72 @@ This project is licensed under the MIT License.
 **🎉 Ready to chat with your AI agent!** 
 
 Start the server with `python run_server.py` and open `chat_client.html` in your browser for the full streaming experience! 🤖✨
+
+## 🖼️ Image Analysis Features
+
+The LangGraph Agent now supports comprehensive image analysis capabilities:
+
+### Supported Image Formats
+- **Local Images**: Upload images directly through the web interface
+- **Image URLs**: Analyze images from web URLs
+- **Base64 Images**: Process base64-encoded image data
+- **File Formats**: JPEG, PNG, GIF, WebP, BMP
+
+### Image Analysis Methods
+
+1. **Web Interface Upload**
+   - Drag and drop images into the upload area
+   - Click to browse and select images
+   - Multiple image support
+   - Real-time preview with remove option
+
+2. **URL Analysis**
+   ```
+   Analyze this image: https://example.com/image.jpg
+   ```
+
+3. **Local File Analysis**
+   ```
+   Analyze this image: test_images/sample.png
+   ```
+
+4. **API Endpoints**
+   - `POST /upload-image` - Upload image files
+   - `POST /chat` - Chat with image analysis
+   - `POST /chat/stream` - Streaming chat with images
+
+### Example Usage
+
+**Web Interface:**
+1. Open `chat_client.html` in your browser
+2. Drag and drop an image or click "Upload Image"
+3. Type your question about the image
+4. Send the message for AI analysis
+
+**API Usage:**
+```python
+import requests
+import base64
+
+# Upload image
+with open('image.jpg', 'rb') as f:
+    files = {'file': ('image.jpg', f, 'image/jpeg')}
+    response = requests.post('http://localhost:8000/upload-image', files=files)
+    image_data = response.json()
+
+# Chat with image
+chat_request = {
+    "message": "What do you see in this image?",
+    "images": [image_data]
+}
+response = requests.post('http://localhost:8000/chat', json=chat_request)
+```
+
+### Image Processing Features
+- Automatic image resizing for optimal processing
+- Base64 encoding for API transmission
+- MIME type detection
+- Error handling for unsupported formats
+- Memory-efficient processing
+
+---

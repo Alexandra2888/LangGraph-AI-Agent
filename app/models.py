@@ -1,6 +1,18 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List, Literal
+from typing import Optional, List, Literal, Union
 from datetime import datetime
+
+
+class ImageData(BaseModel):
+    """Model for image data"""
+    data: str = Field(...,
+                      description="Base64 encoded image data or image URL")
+    type: Literal["base64",
+                  "url"] = Field(..., description="Type of image data")
+    filename: Optional[str] = Field(
+        None, description="Original filename if uploaded")
+    mime_type: Optional[str] = Field(
+        None, description="MIME type of the image")
 
 
 class ChatRequest(BaseModel):
@@ -9,6 +21,8 @@ class ChatRequest(BaseModel):
                          description="The user's message to the agent", min_length=1)
     session_id: Optional[str] = Field(
         None, description="Optional session ID for conversation tracking")
+    images: Optional[List[ImageData]] = Field(
+        None, description="Optional list of images to analyze")
 
 
 class StreamingChatRequest(BaseModel):
@@ -18,6 +32,8 @@ class StreamingChatRequest(BaseModel):
     session_id: Optional[str] = Field(
         None, description="Optional session ID for conversation tracking")
     stream: bool = Field(default=True, description="Enable streaming response")
+    images: Optional[List[ImageData]] = Field(
+        None, description="Optional list of images to analyze")
 
 
 class ChatResponse(BaseModel):
