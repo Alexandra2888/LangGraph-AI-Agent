@@ -1,7 +1,7 @@
 import os
 import json
 import sqlite3
-from typing import TypedDict, List, Literal
+from typing import TypedDict, List, Literal, AsyncGenerator, Generator
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
@@ -13,6 +13,7 @@ import base64
 from io import BytesIO
 from PIL import Image
 from pathlib import Path
+import asyncio
 
 # load environment variables
 load_dotenv()
@@ -38,7 +39,7 @@ def calculator(expression: str) -> str:
     try:
         import math
 
-        # dreate a safe namespace for evaluation
+        # create a safe namespace for evaluation
         safe_dict = {
             "__builtins__": {},
             "abs": abs, "round": round, "min": min, "max": max,
@@ -96,11 +97,11 @@ def fetch_user_from_database(user_id: str) -> str:
         User information as JSON string
     """
     try:
-        # dreate dummy database in memory
+        # create dummy database in memory
         conn = sqlite3.connect(':memory:')
         cursor = conn.cursor()
 
-        # dreate and populate dummy users table
+        # create and populate dummy users table
         cursor.execute('''
             CREATE TABLE users (
                 id TEXT PRIMARY KEY,
@@ -303,7 +304,7 @@ Use tools when needed to provide accurate information. Always be helpful and exp
                 vision_context = f"Local image: {filename}"
                 break
 
-    # ff we have vision content, use vision model
+    # If we have vision content, use vision model
     if vision_content:
         try:
             vision_model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
@@ -319,7 +320,7 @@ Use tools when needed to provide accurate information. Always be helpful and exp
                 content=f"Error analyzing image: {str(e)}")
             return {"messages": messages + [error_response]}
 
-    # use normal model with tools 
+    # use normal model with tools
     try:
         model = ChatOpenAI(model="gpt-4o-mini",
                            temperature=0).bind_tools(tools)
@@ -419,7 +420,7 @@ class LangGraphAgent:
 
         # add nodes
         workflow.add_node("agent", call_model)
-        workflow.add_node("tools", execute_tools)  # Use custom tool execution
+        workflow.add_node("tools", execute_tools)
 
         # set entry point
         workflow.set_entry_point("agent")
@@ -434,13 +435,13 @@ class LangGraphAgent:
     def chat(self, message: str) -> str:
         """Chat with the agent"""
         try:
-            # xreate initial state
+            # Create initial state
             initial_state = {"messages": [HumanMessage(content=message)]}
 
-            # run the graph
+            # Run the graph
             result = self.graph.invoke(initial_state)
 
-            # extract the final response
+            # Extract the final response
             messages = result["messages"]
             for msg in reversed(messages):
                 if isinstance(msg, AIMessage):
@@ -450,6 +451,88 @@ class LangGraphAgent:
 
         except Exception as e:
             return f"Error: {str(e)}"
+
+    def chat_stream(self, message: str) -> Generator[dict, None, None]:
+        """Chat with the agent with streaming support"""
+        try:
+            # Create initial state
+            initial_state = {"messages": [HumanMessage(content=message)]}
+
+            # Track tool execution phase and final response
+            tool_phase = False
+            final_response_sent = False
+
+            # Run the streaming graph
+            for event in self.graph.stream(initial_state):
+                # Check if we're entering or exiting tool phase
+                if "tools" in event:
+                    if not tool_phase:
+                        yield {"event": "tool_start", "data": "Executing tools..."}
+                        tool_phase = True
+                elif tool_phase and "agent" in event:
+                    yield {"event": "tool_end", "data": "Tools completed"}
+                    tool_phase = False
+
+                # Process agent responses
+                if "agent" in event:
+                    messages = event["agent"]["messages"]
+                    last_message = messages[-1] if messages else None
+
+                    if isinstance(last_message, AIMessage) and last_message.content:
+                        # Check if this is a final response (no tool calls)
+                        has_tool_calls = hasattr(
+                            last_message, 'tool_calls') and last_message.tool_calls
+
+                        if not has_tool_calls and not final_response_sent:
+                            # This is the final response, stream it token by token
+                            content = last_message.content
+                            # Stream word by word for better UX
+                            words = content.split()
+                            for i, word in enumerate(words):
+                                token = word + \
+                                    (" " if i < len(words) - 1 else "")
+                                yield {"event": "token", "data": token}
+                            final_response_sent = True
+
+            # Signal completion
+            yield {"event": "done", "data": ""}
+
+        except Exception as e:
+            yield {"event": "error", "data": str(e)}
+
+    async def chat_stream_async(self, message: str) -> AsyncGenerator[dict, None]:
+        """Async version of chat_stream with real-time streaming"""
+        try:
+            # Send connection event
+            yield {"event": "connected", "data": "Stream started"}
+
+            # Use asyncio to run the synchronous streaming in a thread
+            loop = asyncio.get_event_loop()
+
+            def collect_events():
+                """Collect all streaming events"""
+                events = []
+                try:
+                    for event in self.chat_stream(message):
+                        events.append(event)
+                except Exception as e:
+                    events.append({"event": "error", "data": str(e)})
+                return events
+
+            # Run in thread pool executor
+            events = await loop.run_in_executor(None, collect_events)
+
+            # Yield events with delays for streaming effect
+            for event in events:
+                yield event
+                # Add delay based on event type for better UX
+                if event.get("event") == "token":
+                    await asyncio.sleep(0.03)  # Faster for tokens
+                else:
+                    await asyncio.sleep(0.1)   # Slower for other events
+
+        except Exception as e:
+            yield {"event": "error", "data": str(e)}
 
     def get_capabilities(self):
         """Get agent capabilities for API documentation"""
